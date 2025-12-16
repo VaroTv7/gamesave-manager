@@ -1,0 +1,13 @@
+services:
+  app:
+    build: .
+    container_name: gamesave-manager
+    restart: unless-stopped
+    ports:
+      - "8300:5000"
+    volumes:
+      - /mnt/nas/gamesaves:/data
+    environment:
+      - DATA_DIR=/data
+      - DB_PATH=/data/gamesaves.db
+      - STATIC_FOLDER=/app/frontend/dist
