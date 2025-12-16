@@ -7,7 +7,8 @@ services:
       - "8300:5000"
     volumes:
       - /mnt/nas/gamesaves:/data
+      - ./database:/app/database
     environment:
       - DATA_DIR=/data
-      - DB_PATH=/data/gamesaves.db
+      - DB_PATH=/app/database/gamesaves.db
       - STATIC_FOLDER=/app/frontend/dist
