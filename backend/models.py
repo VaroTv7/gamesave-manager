@@ -121,6 +121,22 @@ class Database:
                 (new_path, version_id)
             )
 
+    def update_version_note(self, version_id, note):
+        with self._get_conn() as conn:
+            conn.execute(
+                'UPDATE versions SET notes = ? WHERE id = ?',
+                (note, version_id)
+            )
+        return True
+
+    def update_savedata_platform(self, save_id, platform):
+        with self._get_conn() as conn:
+            conn.execute(
+                'UPDATE savedata SET platform = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+                (platform, save_id)
+            )
+        return True
+
     def delete_savedata(self, save_id):
         with self._get_conn() as conn:
             conn.execute('DELETE FROM savedata WHERE id = ?', (save_id,))

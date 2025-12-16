@@ -5,6 +5,13 @@ import Modal from './components/Modal';
 // API Base - Change if deployed differently
 const API_BASE = '/api';
 
+// Platform Options
+const PLATFORMS = [
+  "PC", "Steam", "GOG", "Epic Games", "Ubisoft", "Origin", "Amazon Games",
+  "Nintendo Switch", "PlayStation 5", "PlayStation 4", "Xbox Series X/S", "Xbox One",
+  "Retro / Emulator", "Other"
+];
+
 function App() {
   const [saves, setSaves] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -13,7 +20,6 @@ function App() {
   // Modals State
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [selectedSave, setSelectedSave] = useState(null); // For Details/Edit
-  const [isEditMode, setIsEditMode] = useState(false);
 
   // Forms
   const [formData, setFormData] = useState({ game_name: '', platform: '', file: null });
@@ -63,14 +69,16 @@ function App() {
       if (res.ok) {
         fetchSaves();
         if (selectedSave) {
-          // Update selected save local state mainly for the Name in modal
-          setSelectedSave({ ...selectedSave, ...updates });
+          // Update local state if needed
+          const updated = { ...selectedSave, ...updates };
+          setSelectedSave(updated);
         }
-        setIsEditMode(false);
+        return true;
       }
     } catch (err) {
       alert("Update failed");
     }
+    return false;
   };
 
   const handleDelete = async (saveId) => {
@@ -101,7 +109,7 @@ function App() {
               <Gamepad2 size={24} />
             </div>
             <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-violet-400">
-              Varo SaveManager v1.0
+              Varo SaveManager v1.1
             </h1>
           </div>
           <button
@@ -188,11 +196,7 @@ function App() {
               onChange={e => setFormData({ ...formData, platform: e.target.value })}
             >
               <option value="">Select Platform...</option>
-              <option value="PC">PC</option>
-              <option value="Nintendo Switch">Nintendo Switch</option>
-              <option value="PlayStation">PlayStation</option>
-              <option value="Xbox">Xbox</option>
-              <option value="Retro">Retro / Emulator</option>
+              {PLATFORMS.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
           </div>
           <div>
@@ -235,71 +239,223 @@ function App() {
 
 function DetailsModal({ save, onClose, onUpdate, onDelete }) {
   const [versions, setVersions] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  // Edit State
   const [isEditing, setIsEditing] = useState(false);
-  const [newName, setNewName] = useState(save.game_name);
+  const [editName, setEditName] = useState(save.game_name);
+  const [editPlatform, setEditPlatform] = useState(save.platform);
+
+  // Upload State
+  const [uploadFile, setUploadFile] = useState(null);
+  const [uploadNote, setUploadNote] = useState('');
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
-    fetchVersions();
+    fetchDetails();
+    setEditName(save.game_name);
+    setEditPlatform(save.platform);
   }, [save.id]);
 
-  const fetchVersions = async () => {
-    const res = await fetch(`${API_BASE}/saves/${save.id}`);
-    if (res.ok) {
-      // Backend currently returns save obj? Wait, my app.py GET /saves returns list. 
-      // I need a GET /saves/<id> to get versions? 
-      // Ah, looking at my app.py, I only have /api/saves (list) and update/delete. 
-      // I need to fetch versions manually or add a route.
-      // Actually, my backend code has "get_savedata_by_id" but no specific route for it returning versions?
-      // Wait, app.py: @app.route('/api/saves/<int:save_id>/upload')
-      // app.py doesn't seem to have a GET /api/saves/<id> that returns versions list?
-      // I checked my written code. 
-      // It has `get_saves` (LIST), `create_save`, `upload_version`, `update_save`, `download_latest`, `delete_save`.
-      // It MISSES `GET /api/saves/<id>` to return details + versions list!
-      // I MUST FIX THE BACKEND CODE.
+  const fetchDetails = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/saves/${save.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        const sorted = (data.versions || []).sort((a, b) => b.version_number - a.version_number);
+        setVersions(sorted);
+      }
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  };
+
+  const handleCreateVersion = async (e) => {
+    e.preventDefault();
+    if (!uploadFile) return;
+    setUploading(true);
+    const data = new FormData();
+    data.append('file', uploadFile);
+    data.append('notes', uploadNote);
+
+    try {
+      const res = await fetch(`${API_BASE}/saves/${save.id}/upload`, { method: 'POST', body: data });
+      if (res.ok) {
+        setUploadFile(null);
+        setUploadNote('');
+        fetchDetails();
+        onUpdate(save.id, {}); // Trigger refresh on parent
+      }
+    } catch (e) { alert("Upload failed"); }
+    setUploading(false);
+  };
+
+  const handleUpdateNote = async (versionId, newNote) => {
+    // Optimistic update
+    const updated = versions.map(v => v.id === versionId ? { ...v, notes: newNote } : v);
+    setVersions(updated);
+
+    try {
+      await fetch(`${API_BASE}/versions/${versionId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: newNote })
+      });
+    } catch (e) {
+      alert("Note update failed");
+      fetchDetails(); // Revert
     }
   };
 
-  // Placeholder for now
+  const handleSaveEdit = async () => {
+    const success = await onUpdate(save.id, {
+      game_name: editName,
+      platform: editPlatform
+    });
+    if (success) setIsEditing(false);
+  };
+
   return (
-    <Modal isOpen={true} onClose={onClose} title={isEditing ? "Edit Game" : save.game_name}>
+    <Modal isOpen={true} onClose={onClose} title={isEditing ? "Edit Game Details" : save.game_name}>
       <div className="space-y-6">
+
+        {/* Game Details Header */}
         {isEditing ? (
-          <div className="flex gap-2">
-            <input
-              value={newName}
-              onChange={e => setNewName(e.target.value)}
-              className="flex-1 bg-black/20 border border-white/10 rounded p-2 text-white"
-            />
-            <button onClick={() => { onUpdate(save.id, { game_name: newName }); setIsEditing(false); }} className="bg-green-600 p-2 rounded"><Check size={18} /></button>
-            <button onClick={() => setIsEditing(false)} className="bg-red-600 p-2 rounded"><XIcon size={18} /></button>
+          <div className="space-y-3 bg-black/20 p-4 rounded-lg">
+            <div>
+              <label className="text-xs text-gray-500 uppercase">Name</label>
+              <input
+                value={editName}
+                onChange={e => setEditName(e.target.value)}
+                className="w-full bg-black/20 border border-white/10 rounded p-2 text-white"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 uppercase">Platform</label>
+              <select
+                value={editPlatform}
+                onChange={e => setEditPlatform(e.target.value)}
+                className="w-full bg-black/20 border border-white/10 rounded p-2 text-white"
+              >
+                {PLATFORMS.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button onClick={handleSaveEdit} className="bg-green-600 text-white px-3 py-1 rounded text-sm flex items-center gap-1"><Check size={14} /> Save</button>
+              <button onClick={() => setIsEditing(false)} className="bg-gray-600 text-white px-3 py-1 rounded text-sm flex items-center gap-1"><XIcon size={14} /> Cancel</button>
+            </div>
           </div>
         ) : (
-          <div className="flex justify-between items-center">
-            <span className="text-gray-400 text-sm">Platform: {save.platform}</span>
+          <div className="flex justify-between items-center bg-white/5 p-4 rounded-lg">
+            <div>
+              <div className="text-sm text-gray-400">Platform</div>
+              <div className="font-medium text-primary">{save.platform || "Unknown"}</div>
+            </div>
             <div className="flex gap-2">
-              <button onClick={() => setIsEditing(true)} className="p-2 hover:bg-white/10 rounded text-blue-400"><Edit2 size={18} /></button>
-              <button onClick={() => onDelete(save.id)} className="p-2 hover:bg-white/10 rounded text-red-400"><Trash2 size={18} /></button>
+              <button title="Edit Details" onClick={() => setIsEditing(true)} className="p-2 hover:bg-white/10 rounded text-blue-400 transition-colors"><Edit2 size={18} /></button>
+              <button title="Delete Game" onClick={() => onDelete(save.id)} className="p-2 hover:bg-white/10 rounded text-red-400 transition-colors"><Trash2 size={18} /></button>
             </div>
           </div>
         )}
 
-        <div className="border-t border-white/10 pt-4">
-          <h3 className="font-bold mb-4">Versions History</h3>
-          <div className="space-y-2 max-h-60 overflow-y-auto">
-            {/* Versions list would go here. I need to fix backend to provide it. */}
-            <div className="text-center text-gray-500 italic">Backend update required for versions list</div>
+        {/* Versions List */}
+        <div>
+          <h3 className="font-bold mb-3 flex items-center gap-2 text-gray-300">
+            <Calendar size={16} /> Version History
+          </h3>
+          <div className="space-y-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+            {loading ? <div className="text-center text-sm py-4">Loading history...</div> :
+              versions.length === 0 ? <div className="text-center text-sm py-4 text-gray-500">No versions uploaded yet.</div> :
+                versions.map(v => (
+                  <VersionItem key={v.id} version={v} onUpdateNote={handleUpdateNote} />
+                ))}
           </div>
         </div>
 
+        {/* Upload Form */}
         <div className="border-t border-white/10 pt-4">
-          <button className="w-full border-2 border-dashed border-white/10 hover:border-primary/50 p-4 rounded-lg text-gray-400 hover:text-white transition-all">
-            Upload New Version (.zip)
-          </button>
+          <h3 className="font-bold mb-3 text-sm text-gray-300">Upload New Version</h3>
+          <form onSubmit={handleCreateVersion} className="space-y-3">
+            <div className="flex gap-2">
+              <input
+                className="flex-1 bg-black/20 border border-white/10 rounded px-3 py-2 text-sm text-white focus:ring-1 focus:ring-primary"
+                placeholder="Version notes (e.g. Before Boss, Lvl 50...)"
+                value={uploadNote}
+                onChange={e => setUploadNote(e.target.value)}
+              />
+            </div>
+            <div className="flex gap-3">
+              <div className="flex-1 relative">
+                <input
+                  type="file"
+                  accept=".zip"
+                  onChange={e => setUploadFile(e.target.files[0])}
+                  className="hidden"
+                  id="ver-upload"
+                />
+                <label htmlFor="ver-upload" className={`block w-full text-center border border-dashed rounded py-2 text-sm cursor-pointer transition-colors ${uploadFile ? 'border-primary text-primary bg-primary/10' : 'border-gray-600 text-gray-400 hover:border-gray-400'}`}>
+                  {uploadFile ? uploadFile.name : "+ Select Zip"}
+                </label>
+              </div>
+              <button disabled={!uploadFile || uploading} type="submit" className="bg-primary disabled:opacity-50 hover:bg-blue-600 text-white px-4 py-2 rounded font-medium text-sm flex items-center gap-2">
+                {uploading ? "Uploading..." : <><Upload size={14} /> Upload</>}
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     </Modal>
   )
+}
+
+function VersionItem({ version, onUpdateNote }) {
+  const [isEditingNote, setIsEditingNote] = useState(false);
+  const [note, setNote] = useState(version.notes || '');
+
+  const saveNote = () => {
+    onUpdateNote(version.id, note);
+    setIsEditingNote(false);
+  };
+
+  return (
+    <div className="bg-surface border border-white/5 p-3 rounded hover:bg-white/5 transition-colors group">
+      <div className="flex justify-between items-start mb-1">
+        <div className="flex items-center gap-2">
+          <span className="bg-primary/20 text-primary text-xs font-bold px-1.5 py-0.5 rounded">v{version.version_number}</span>
+          <span className="text-xs text-gray-500">{version.created_at_formatted}</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-mono text-gray-400">{version.formatted_size}</span>
+          <a href={`${API_BASE}/versions/${version.id}/download`} className="text-gray-400 hover:text-white transition-colors" title="Download">
+            <Download size={14} />
+          </a>
+        </div>
+      </div>
+
+      {/* Note Section */}
+      <div className="mt-1">
+        {isEditingNote ? (
+          <div className="flex gap-2 mt-1">
+            <input
+              value={note}
+              onChange={e => setNote(e.target.value)}
+              className="flex-1 bg-black/40 text-xs border border-white/10 rounded px-2 py-1 text-white"
+              autoFocus
+            />
+            <button onClick={saveNote} className="text-green-400 hover:text-green-300"><Check size={14} /></button>
+            <button onClick={() => { setNote(version.notes || ''); setIsEditingNote(false); }} className="text-red-400 hover:text-red-300"><XIcon size={14} /></button>
+          </div>
+        ) : (
+          <div className="flex justify-between items-center group/note">
+            <p className="text-sm text-gray-300 truncate pr-2 max-w-[250px]">{version.notes || <span className="text-gray-600 italic">No notes</span>}</p>
+            <button onClick={() => setIsEditingNote(true)} className="opacity-0 group-hover/note:opacity-100 text-gray-500 hover:text-blue-400 transition-opacity">
+              <Edit2 size={12} />
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export default App;

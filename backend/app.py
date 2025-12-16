@@ -94,10 +94,6 @@ def upload_version(save_id):
     if not save:
         return jsonify({"error": "Save not found"}), 404
 
-    # Save temp to calculate hash/size or direct save
-    # Determine version number
-    # We should really optimize this to not race condition but for personal use ok
-    # better to let DB handle it? We need number for filename
     versions = db.get_versions(save_id)
     next_ver = 1
     if versions:
@@ -122,46 +118,42 @@ def update_save(save_id):
     new_name = data.get('game_name')
     new_platform = data.get('platform')
     
-    # Platform update is simple
+    # Platform Update
     if new_platform:
-        # We don't have update_platform in DB yet, assumes rename_savedata handles all or separate
-        # Let's just handle game_name rename which is the critical bug
-        pass 
+        db.update_savedata_platform(save_id, new_platform)
 
+    # Rename Protocol
     if new_name and new_name != save['game_name']:
-        # RENAME PROTOCOL
         print(f"Renaming {save['game_name']} -> {new_name}")
         
-        # 1. Get all versions
         versions = db.get_versions(save_id)
-        
-        # 2. Rename files
         errors = []
         for v in versions:
             old_filename = v['file_path']
-            # Reconstruct new filename preserving version and extension
-            # Get extension from old filename
             _, ext = os.path.splitext(old_filename)
-            
             new_filename = utils.generate_version_filename(save_id, new_name, v['version_number'], ext)
             
-            # Physical Rename
             success, msg = utils.rename_physical_file(DATA_DIR, old_filename, new_filename)
             if success:
-                # Update DB reference
                 db.update_version_path(v['id'], new_filename)
             else:
                 errors.append(f"Ver {v['version_number']}: {msg}")
         
         if errors:
             print("Errors during file rename:", errors)
-            # We still proceed to rename the DB entry? Maybe partial failure is bad.
-            # But better to rename what we can.
             
-        # 3. Rename in DB
         db.rename_savedata(save_id, new_name)
 
     return jsonify({"success": True})
+
+@app.route('/api/versions/<int:version_id>', methods=['PUT'])
+def update_version(version_id):
+    data = request.json
+    if not data or 'note' not in data:
+        return jsonify({'error': 'No note provided'}), 400
+    
+    db.update_version_note(version_id, data['note'])
+    return jsonify({'message': 'Note updated successfully'})
 
 @app.route('/api/saves/<int:save_id>/download', methods=['GET'])
 def download_latest(save_id):
