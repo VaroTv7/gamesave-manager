@@ -32,7 +32,7 @@ def get_saves():
     saves = db.get_all_saves()
     # Enhance specific formatting if needed
     for save in saves:
-        if save['file_size']:
+        if save.get('file_size'):
              save['formatted_size'] = utils.format_file_size(save['file_size'])
     return jsonify(saves)
 
